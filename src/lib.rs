@@ -17,13 +17,14 @@ type UniPoly_381 = DensePolynomial<<Bls12_381 as Pairing>::ScalarField>;
 #[derive(Default, Debug, Clone)]
 pub struct KZG {
     pub polynomial: UniPoly_381,
-    // pub curve:
+    pub curve: Bls12_381,
     pub polynomial_degree: usize, // this would be operated on using BigInteger trait
     pub tau: usize,
     pub a: usize,
     pub commitment: BigInt<{ usize }>,
     pub quotient_polynomial: UniPoly_381,
-    pub proof_pie: BigInt<{ usize }>
+    pub proof_pie: BigInt<{ usize }>,
+    pub public_parameter: Vec<BigInt<{ usize}>>
 }
 
 
@@ -69,7 +70,9 @@ mod tests {
     pub fn test_kzg() {
         let kzg = KZG::new_with_rand_poly();
         let pt = kzg.clone().polynomial;
+        let curve = kzg.clone().curve;
 
-        println!("I am printing now! pt _> {:?}", pt[0].to_string());
+        println!("I am printing now! pt _> 111 {:?}", pt[0].to_string());
+        println!("I am printing now! pt _> 222 {:?}", curve);
     }
 }
