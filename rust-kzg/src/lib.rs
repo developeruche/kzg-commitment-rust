@@ -1,7 +1,7 @@
 mod playground;
 mod poly;
 
-use oblast::{curve_order, Scalar, P1, P2};
+use oblast::{curve_order, verify_pairings, Scalar, P1, P2, Fr};
 use num_bigint::BigUint;
 use rand::prelude::*;
 
@@ -12,29 +12,35 @@ use rand::prelude::*;
 // DATA-STRUCTURE                     =
 // ====================================
 #[derive(Clone, Debug, PartialEq)]
-struct PP {
+pub struct PP {
     pub points_in_g1: Vec<P1>,
     pub point_in_g2: P2
 }
 
 
 #[derive(Clone, Debug, PartialEq)]
-struct KZG {
+pub  struct KZG {
     pub public_parameter: PP
 }
 
 #[derive(Debug)]
 pub struct Commitment<'a> {
-    element: P1,
-    polynomial: &'a poly::Polynomial,
-    public_parameter: &'a PP,
+    pub element: P1,
+    pub polynomial: &'a poly::Polynomial,
+    pub public_parameter: &'a PP,
+}
+
+#[derive(Debug)]
+pub struct Opening {
+    pub value: Fr,
+    pub proof: P1,
 }
 
 
 
-// =====================  CUSTOM DEFINED ERROR;
+// =========== CUSTOM DEFINED ERROR;
 #[derive(Debug)]
-enum KZGErrors {
+pub enum KZGErrors {
     SecretMustBeLessThanTheOrderOfTheGroup
 }
 
@@ -109,10 +115,10 @@ impl KZG {
 
 
     pub fn commit<'a>(
-        &'a mut self,
+        public_parameter: &'a PP,
         polynomial: &'a poly::Polynomial,
-    ) -> Result<Commitment, KZGErrors> {
-        let basis = &self.public_parameter.points_in_g1;
+    ) -> Result<Commitment<'a>, KZGErrors> {
+        let basis = &public_parameter.points_in_g1;
         let coefficients = &polynomial.coefficients;
 
         let mut result = P1::default();
@@ -124,19 +130,35 @@ impl KZG {
         Ok(Commitment {
             element: result,
             polynomial,
-            public_parameter: &self.public_parameter,
+            public_parameter: &public_parameter,
         })
     }
 }
 
 
+impl<'a> Commitment<'a> {
+    pub fn open_at(self: &Self, point: Fr) -> Result<Opening, KZGErrors> {
+        let result = self.polynomial.evaluate_at(point);
 
+        // divisor `s - x` for `f(x) = y`
+        let divisor_coefficients = vec![-point, Fr::from_u64(1)];
+        let divisor = poly::from_coefficients(divisor_coefficients.into_iter());
+        let quotient_polynomial = compute_quotient(self.polynomial, &divisor);
+
+        let commitment = KZG::commit(self.public_parameter, &quotient_polynomial)?;
+
+        Ok(Opening {
+            value: result,
+            proof: commitment.element,
+        })
+    }
+}
 
 
 // ===================================
 // FREE FUNCTIONS
 // ===================================
-fn compute_quotient(
+fn compute_quotient( // this is a simple function for dividing a polynomial and returning the q
     dividend: &poly::Polynomial,
     divisor: &poly::Polynomial,
 ) -> poly::Polynomial {
@@ -167,6 +189,19 @@ fn compute_quotient(
     poly::Polynomial { coefficients }
 }
 
+impl Opening {
+    pub fn verify(&self, input: &Fr, commitment: &Commitment) -> bool {
+        // Compute [f(s) - y]_1 for LHS
+        let y_p1 = self.value * P1::generator();
+        let commitment_minus_y = commitment.element + -y_p1;
+
+        // Compute [s - z]_2 for RHS
+        let z_p2 = *input * P2::generator();
+        let s_minus_z = commitment.public_parameter.point_in_g2 + -z_p2;
+
+        verify_pairings(commitment_minus_y, P2::generator(), self.proof, s_minus_z)
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
