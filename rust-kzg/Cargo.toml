@@ -11,3 +11,4 @@ ark-poly = "0.4.2"
 oblast = {path="../oblast"}
 num-bigint = "0.3.1"
 rand = "0.8.3"
+hex = "0.4.2"
