@@ -1,4 +1,6 @@
 mod playground;
+mod poly;
+
 use oblast::{curve_order, Scalar, P1, P2};
 use num_bigint::BigUint;
 use rand::prelude::*;
@@ -6,7 +8,9 @@ use rand::prelude::*;
 
 
 
-
+// ====================================
+// DATA-STRUCTURE                     =
+// ====================================
 #[derive(Clone, Debug, PartialEq)]
 struct PP {
     pub points_in_g1: Vec<P1>,
@@ -19,7 +23,16 @@ struct KZG {
     pub public_parameter: PP
 }
 
+#[derive(Debug)]
+pub struct Commitment<'a> {
+    element: P1,
+    polynomial: &'a poly::Polynomial,
+    public_parameter: &'a PP,
+}
 
+
+
+// =====================  CUSTOM DEFINED ERROR;
 #[derive(Debug)]
 enum KZGErrors {
     SecretMustBeLessThanTheOrderOfTheGroup
@@ -93,10 +106,66 @@ impl KZG {
             }
         )
     }
+
+
+    pub fn commit<'a>(
+        &'a mut self,
+        polynomial: &'a poly::Polynomial,
+    ) -> Result<Commitment, KZGErrors> {
+        let basis = &self.public_parameter.points_in_g1;
+        let coefficients = &polynomial.coefficients;
+
+        let mut result = P1::default();
+        for (coefficient, element) in coefficients.iter().zip(basis.iter()) {
+            let term = *coefficient * *element;
+            result = result + term;
+        }
+
+        Ok(Commitment {
+            element: result,
+            polynomial,
+            public_parameter: &self.public_parameter,
+        })
+    }
 }
 
 
 
+
+
+// ===================================
+// FREE FUNCTIONS
+// ===================================
+fn compute_quotient(
+    dividend: &poly::Polynomial,
+    divisor: &poly::Polynomial,
+) -> poly::Polynomial {
+    let mut dividend = dividend.coefficients.clone();
+    let mut coefficients = vec![];
+
+    let mut dividend_pos = dividend.len() - 1;
+    let divisor_pos = divisor.coefficients.len() - 1;
+    let mut difference = dividend_pos as isize - divisor_pos as isize;
+
+    while difference >= 0 {
+        let term_quotient = dividend[dividend_pos] / divisor.coefficients[divisor_pos];
+        coefficients.push(term_quotient);
+
+        for i in (0..=divisor_pos).rev() {
+            let difference = difference as usize;
+            let x = divisor.coefficients[i];
+            let y = x * term_quotient;
+            let z = dividend[difference + i];
+            dividend[difference + i] = z - y;
+        }
+
+        dividend_pos -= 1;
+        difference -= 1;
+    }
+
+    coefficients.reverse();
+    poly::Polynomial { coefficients }
+}
 
 #[cfg(test)]
 mod tests {
