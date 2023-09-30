@@ -1,78 +1,115 @@
 mod playground;
-
-use ark_bls12_381::Bls12_381;
-use ark_ff::{BigInt, BigInteger, Field, One, PrimeField, Zero};
-use ark_poly::univariate::DensePolynomial;
-use ark_ec::pairing::Pairing;
-use ark_poly::DenseUVPolynomial;
-use ark_std::test_rng;
+use oblast::{curve_order, Scalar, P1, P2};
+use num_bigint::BigUint;
+use rand::prelude::*;
 
 
 
 
 
-type UniPoly_381 = DensePolynomial<<Bls12_381 as Pairing>::ScalarField>;
-
-
-#[derive(Default, Debug, Clone)]
-pub struct KZG {
-    pub polynomial: UniPoly_381,
-    pub curve: Bls12_381,
-    pub polynomial_degree: usize, // this would be operated on using BigInteger trait
-    pub tau: usize,
-    pub a: usize,
-    pub commitment: BigInt<{ usize }>,
-    pub quotient_polynomial: UniPoly_381,
-    pub proof_pie: BigInt<{ usize }>,
-    pub public_parameter: Vec<BigInt<{ usize}>>
+#[derive(Clone, Debug, PartialEq)]
+struct PP {
+    pub points_in_g1: Vec<P1>,
+    pub point_in_g2: P2
 }
 
+
+#[derive(Clone, Debug, PartialEq)]
+struct KZG {
+    pub public_parameter: PP
+}
+
+
+#[derive(Debug)]
+enum KZGErrors {
+    SecretMustBeLessThanTheOrderOfTheGroup
+}
 
 
 impl KZG {
-    pub fn new() -> Self {
-        Self::default()
+    fn new(tau: &[u8; 32], degree: usize) -> Result<KZG, KZGErrors> {
+        KZG::setup_internal(tau, degree)
     }
 
-    pub fn new_with_rand_poly() -> Self {
-        let rng = &mut test_rng();
+    fn new_rand(degree: usize) -> Result<KZG, KZGErrors> {
+        let mut rng = thread_rng();
 
-        Self {
-            polynomial: UniPoly_381::rand(10, rng),
-            ..Default::default()
+        let mut secret = [0u8; 32];
+        rng.fill_bytes(&mut secret);
+
+        let mut s = BigUint::from_bytes_be(&secret);
+
+        let modulus = curve_order();
+        while s >= modulus {
+            rng.fill_bytes(&mut secret);
+            s = BigUint::from_bytes_be(&secret);
         }
+
+
+        KZG::setup_internal(&secret, degree)
     }
 
 
-    pub fn trusted_set_up(&mut self) {
+    fn setup_internal(tau: &[u8; 32], degree: usize) -> Result<KZG, KZGErrors> {
+        let modulus = curve_order();
+        let bytes_tau = BigUint::from_bytes_be(tau);
 
-    }
 
-    pub fn commit(&mut self) {
+        if bytes_tau > modulus {
+            return Err(KZGErrors::SecretMustBeLessThanTheOrderOfTheGroup);
+        }
 
-    }
+        let mut points_in_g1 = vec![];
 
-    pub fn evaluate_n_proof(&mut self) {
+        // obtaining the generator in the first group (this is the cyclic group)
+        let g1 = P1::generator();
 
-    }
+        // obtaining the "power of tau" (a part of the public parameter)
+        for i in 0..=degree {
+            let i_as_bigint = BigUint::from_slice(&[i as u32]);
+            let s_i_as_bigint = bytes_tau.modpow(&i_as_bigint, &modulus);
 
-    pub fn verify_an_evaluation(&mut self) {
+            let mut s_i_bytes = vec![0u8; 32];
+            let raw_bytes = s_i_as_bigint.to_bytes_be();
+            s_i_bytes[32 - raw_bytes.len()..].copy_from_slice(&raw_bytes);
+            let s_i_scalar = Scalar::from_fr_bytes(&s_i_bytes);
 
+            let result = s_i_scalar * g1;
+            points_in_g1.push(result);
+        }
+
+
+        let scalar = Scalar::from_fr_bytes(tau);
+        let result_in_g2 = scalar * P2::generator();
+
+        let public_parameter = PP {
+            points_in_g1,
+            point_in_g2: result_in_g2,
+        };
+
+        Ok(
+            KZG {
+                public_parameter
+            }
+        )
     }
 }
 
+
+
+
 #[cfg(test)]
 mod tests {
-    use crate::*;
-
+    use super::*;
 
     #[test]
-    pub fn test_kzg() {
-        let kzg = KZG::new_with_rand_poly();
-        let pt = kzg.clone().polynomial;
-        let curve = kzg.clone().curve;
+    fn test_setup() {
+        let tau = [34u8; 32];
+        let degree = 29;
 
-        println!("I am printing now! pt _> 111 {:?}", pt[0].to_string());
-        println!("I am printing now! pt _> 222 {:?}", curve);
+
+        let kzg = KZG::new(&tau, degree).unwrap();
+        println!("This is KZG -> {:?}", kzg);
+        assert_eq!(kzg.public_parameter.points_in_g1.len(), degree + 1);
     }
 }
